@@ -1,0 +1,27 @@
+[project]
+name = "krutrim-hermes-backend"
+version = "0.1.0"
+description = "Ola Krutrim Cloud Sandbox as a Hermes terminal execution backend."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Ola Krutrim" }]
+keywords = ["krutrim", "hermes", "sandbox", "agent", "terminal"]
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+]
+# No runtime dependencies by design: the backend speaks four REST endpoints over
+# the standard library rather than pulling an SDK into a Hermes user's environment.
+dependencies = []
+
+[project.urls]
+Homepage = "https://cloud.olakrutrim.com"
+Source = "https://github.com/ola-krutrim/krutrim-hermes-backend"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["krutrim"]
