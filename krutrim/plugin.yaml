@@ -1,0 +1,5 @@
+name: krutrim
+version: 0.1.0
+kind: backend
+description: Ola Krutrim Cloud Sandbox as a Hermes terminal execution backend.
+entry: __init__.py
