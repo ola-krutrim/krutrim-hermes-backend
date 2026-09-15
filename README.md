@@ -94,11 +94,23 @@ command arrives while a sandbox is still starting.
 `TerminalEnvironmentProvider` contract — a Hermes-specific extension point. Claude Code, Codex and
 Cursor have no equivalent "swap the terminal backend" hook, so there is nothing to port.
 
-**If you use one of those, you already have a path:**
-[ola-krutrim/Krutrim-MCP](https://github.com/ola-krutrim/Krutrim-MCP) ships guarded Sandbox tools
-from v1.0.3 (lifecycle, command execution and file transfer), over MCP, which all three speak.
+**If you use one of those,** [ola-krutrim/Krutrim-MCP](https://github.com/ola-krutrim/Krutrim-MCP)
+ships guarded Sandbox tools from v1.0.3 — lifecycle, command execution and file transfer — over MCP,
+which all three speak.
 
-The two are different in kind, and it is worth knowing which you want:
+> ⚠️ **It needs a different credential.** Verified against `krutrim-mcp-server` 1.0.3: API-key
+> authentication is disabled, and the server refuses to start if `KRUTRIMCLIENT_API_KEY` is set:
+>
+> ```
+> Authentication configuration error: API-key authentication is disabled in this release.
+> Remove KRUTRIM_API_KEY and its legacy aliases, then configure both
+> KRUTRIM_ACCESS_TOKEN and KRUTRIM_REFRESH_TOKEN.
+> ```
+>
+> So the sandbox API key that this plugin uses will **not** get you into Krutrim-MCP — you need IAM
+> access and refresh tokens instead. Worth knowing before you plan an afternoon around it.
+
+The two are also different in kind, and it is worth knowing which you want:
 
 | | what it does |
 |---|---|
