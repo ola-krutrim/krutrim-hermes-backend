@@ -102,6 +102,29 @@ tooling rather than using Hermes, four things are worth knowing up front:
   created — a name-prefix sweep will destroy a colleague's running work.
 - **A finite TTL is always set** so a crash that skips cleanup cannot leak a sandbox indefinitely.
 
+## Tests
+
+Standard library only — no test dependency, matching the plugin itself.
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+50 tests. 40 run offline with no API key and no Hermes install; the other 10 talk to the real
+service and are skipped unless you opt in:
+
+```bash
+KRUTRIM_LIVE_TESTS=1 KRUTRIMCLIENT_API_KEY=<key> python3 -m unittest discover -s tests -v
+```
+
+Live tests create and delete a real sandbox each, by id. They never list sandboxes — the account is
+shared, and a list-and-sweep cleanup would destroy someone else's running work.
+
+The offline suite is mutation-checked: eleven deliberate defects were introduced one at a time —
+dropping the name-length cap, sending commands as raw shell, retrying 4xx, letting `execute()`
+raise, removing the credential from `strip_env_keys`, stopping `cleanup()` from deleting — and all
+eleven were caught. A suite that cannot fail is not evidence.
+
 ## Licence
 
 Apache-2.0. See [LICENSE](LICENSE), [COPYRIGHT.md](COPYRIGHT.md),
