@@ -6,18 +6,28 @@ It installs as a Hermes **plugin** — no fork of `hermes-agent`, no upstream pu
 
 > **Beta.** Krutrim Sandbox is in beta and has known issues. Expect rough edges, particularly
 > around provisioning time in some regions and the occasional request that needs a retry. This
-> plugin handles what it can on your behalf. Please report anything you hit.
+> plugin handles what it can on your behalf.
+>
+> Report anything you hit via [GitHub Issues](https://github.com/ola-krutrim/krutrim-hermes-backend/issues)
+> for the plugin, or **cloudsupport@olakrutrim.com** for the sandbox service itself.
 
 ```bash
-export KRUTRIMCLIENT_API_KEY=<your Krutrim Cloud API key>
+git clone https://github.com/ola-krutrim/krutrim-hermes-backend
+rm -rf ~/.hermes/plugins/krutrim          # only if you are reinstalling
+cp -R krutrim-hermes-backend/krutrim ~/.hermes/plugins/krutrim
 
-cp -R krutrim ~/.hermes/plugins/krutrim
+export KRUTRIMCLIENT_API_KEY=<your Krutrim Cloud API key>
 hermes plugins enable krutrim
 hermes config set terminal.backend krutrim
 ```
 
+The `rm -rf` line matters on a reinstall: `cp -R` into an existing directory *nests* the copy, so
+you end up with `~/.hermes/plugins/krutrim/krutrim/` and Hermes finds no plugin.
+
 To go back to local execution: `hermes config set terminal.backend local`. The plugin can stay
 installed — only that setting decides where commands run.
+
+Enabling takes effect on your next Hermes session.
 
 ## What to expect
 
@@ -26,7 +36,7 @@ Measured in `In-Bangalore-1` on `sandbox-small`, driven through Hermes's own env
 | | |
 |---|---|
 | command round-trip | median **0.28 s**, p90 0.40 s |
-| new sandbox ready to use | about **5 seconds** |
+| new sandbox ready to use | about **5 seconds** in Bangalore; Hyderabad can take minutes |
 | commands completed in a 30-command run | **30 of 30** |
 
 A sandbox is created on the first command of a session and deleted when the session ends.
@@ -77,6 +87,26 @@ install runner once, encoded argument       median 0.26s
 
 The plugin also retries transient server errors with backoff, and waits rather than failing when a
 command arrives while a sandbox is still starting.
+
+## Other agents — Claude Code, Codex, Cursor
+
+**This plugin is Hermes-only, and necessarily so.** It implements Hermes's
+`TerminalEnvironmentProvider` contract — a Hermes-specific extension point. Claude Code, Codex and
+Cursor have no equivalent "swap the terminal backend" hook, so there is nothing to port.
+
+**If you use one of those, you already have a path:**
+[ola-krutrim/Krutrim-MCP](https://github.com/ola-krutrim/Krutrim-MCP) ships guarded Sandbox tools
+from v1.0.3 (lifecycle, command execution and file transfer), over MCP, which all three speak.
+
+The two are different in kind, and it is worth knowing which you want:
+
+| | what it does |
+|---|---|
+| **Krutrim-MCP** | Gives the agent sandbox *tools it can choose to call*, alongside tools for the rest of Krutrim Cloud. The agent's own shell still runs locally. |
+| **This plugin** | *Redirects the agent's shell.* Every command Hermes already runs goes to the sandbox instead of your machine — no prompt changes, no new tools to learn. |
+
+So MCP is the right shape for "let the agent manage cloud resources", and this plugin is the right
+shape for "don't run agent-authored commands on my laptop".
 
 ## Using the sandbox directly
 
