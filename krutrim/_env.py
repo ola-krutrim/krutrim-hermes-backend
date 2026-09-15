@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import base64
 import os
-import shlex
-import uuid
+import time
 from typing import Any, Mapping
-
 from ._api import COMMAND_TIMEOUT_MAX, KrutrimAPI, KrutrimError
 
 RUNNER_PATH = "/app/.hermes_runner.sh"
+
+# How long execute() will wait out a 409 "sandbox is not active" before giving up.
+# Generous because Hyderabad deploys take minutes, not seconds.
+NOT_ACTIVE_WAIT_SECONDS = 300.0
 
 # Why a runner instead of sending the command inline:
 #
@@ -69,16 +71,9 @@ class KrutrimTerminalEnvironment:
             return {"output": "krutrim: environment already cleaned up", "exit_code": 1}
         requested = int(timeout if timeout is not None else self._default_timeout)
         clamped = min(requested, COMMAND_TIMEOUT_MAX)
+        arg = base64.b64encode(command.encode()).decode()
         try:
-            self._ensure_runner()
-            arg = base64.b64encode(command.encode()).decode()
-            result = self._api.run(
-                self.sandbox_id,
-                f"bash {RUNNER_PATH} {arg}",
-                timeout_seconds=clamped,
-                cwd=kwargs.get("cwd") or self._cwd,
-                env=kwargs.get("env") or kwargs.get("envs"),
-            )
+            result = self._run_when_active(arg, clamped, kwargs)
         except KrutrimError as exc:
             return {"output": f"krutrim: {exc}", "exit_code": 1}
         except Exception as exc:  # noqa: BLE001 - surfaced to the agent, never raised
@@ -95,6 +90,37 @@ class KrutrimTerminalEnvironment:
         if result.get("stdoutTruncated") or result.get("stderrTruncated"):
             output += "\n[krutrim] output truncated by the service"
         return {"output": output, "exit_code": int(result.get("exitCode") or 0)}
+
+    def _run_when_active(self, arg: str, clamped: int, kwargs: dict) -> dict:
+        """Run the encoded command, waiting out a sandbox that is not active yet.
+
+        The service answers 409 `sandbox is not active (status: deploying)` for a
+        command sent before the sandbox is up. That is a typed, recoverable state
+        rather than a failure, so it is waited on instead of surfaced to the agent --
+        `create_environment` already waits for `active`, but a sandbox can be
+        deploying again later, and Hyderabad deploys are minutes rather than seconds
+        (buzz_dx measured `sandbox-small-hyd` still deploying at 68s against
+        Bangalore's 4.8s).
+        """
+        deadline = time.time() + NOT_ACTIVE_WAIT_SECONDS
+        while True:
+            try:
+                self._ensure_runner()
+                return self._api.run(
+                    self.sandbox_id,
+                    f"bash {RUNNER_PATH} {arg}",
+                    timeout_seconds=clamped,
+                    cwd=kwargs.get("cwd") or self._cwd,
+                    env=kwargs.get("env") or kwargs.get("envs"),
+                )
+            except KrutrimError as exc:
+                if exc.status != 409 or "not active" not in str(exc).lower():
+                    raise
+                if time.time() >= deadline:
+                    raise
+                # The runner upload is invalidated by a restart; re-upload after.
+                self._runner_ready = False
+                time.sleep(2.0)
 
     def extend_ttl(self, ttl_seconds: int) -> None:
         self._api.set_ttl(self.sandbox_id, ttl_seconds)

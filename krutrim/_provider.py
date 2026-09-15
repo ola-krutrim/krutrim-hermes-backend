@@ -15,8 +15,18 @@ DEFAULT_FLAVOR = "sandbox-small"
 DEFAULT_TTL_SECONDS = 3600
 DEFAULT_CWD = "/app"
 
-# Regions the sandbox service exposes today.
-REGIONS = ("In-Bangalore-1", "In-Hyderabad-1")
+# Regions the sandbox service exposes today, with how long to wait for a create.
+#
+# These are NOT the same order of magnitude and a single timeout does not fit both.
+# Measured live: Bangalore reaches `active` in ~5s. Hyderabad did not reach `active`
+# within 240s in my run, and buzz_dx independently saw `sandbox-small-hyd` still
+# deploying at 68s. Hyderabad deletes are also slow-to-stuck -- sandboxes sit in
+# `deleting` for minutes to hours.
+#
+# So Hyderabad gets a much longer budget, and the failure message names the region
+# rather than reading as a generic timeout.
+REGION_CREATE_TIMEOUT = {"In-Bangalore-1": 240.0, "In-Hyderabad-1": 900.0}
+REGIONS = tuple(REGION_CREATE_TIMEOUT)
 
 # Fallback only. The live /flavors endpoint is authoritative and is consulted at
 # create time; this table exists so a create can still pick a sane flavor if that
@@ -170,7 +180,8 @@ class KrutrimProvider(TerminalEnvironmentProvider):
         # `create` answers 202 while the sandbox is still deploying; commands sent
         # before it is active fail. Never skip this.
         try:
-            api.wait_active(sandbox_id)
+            api.wait_active(sandbox_id, timeout=REGION_CREATE_TIMEOUT.get(region, 240.0),
+                            region=region)
         except Exception:
             try:
                 api.delete(sandbox_id)

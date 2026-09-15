@@ -110,7 +110,8 @@ class KrutrimAPI:
         data = self._request("GET", f"/omni/sandbox/v1/sandbox/{sandbox_id}").get("data", {})
         return str(data.get("status") or data.get("state") or "").lower()
 
-    def wait_active(self, sandbox_id: str, *, timeout: float = 240.0, interval: float = 2.0) -> None:
+    def wait_active(self, sandbox_id: str, *, timeout: float = 240.0, interval: float = 2.0,
+                    region: str | None = None) -> None:
         """`create` returns 202 while the sandbox is still `deploying`; the first command
         against a deploying sandbox fails. Callers must not skip this."""
         deadline = time.time() + timeout
@@ -122,7 +123,11 @@ class KrutrimAPI:
             if state in ("failed", "error", "deleted", "terminated"):
                 raise RuntimeError(f"sandbox {sandbox_id} entered terminal state {state!r}")
             time.sleep(interval)
-        raise TimeoutError(f"sandbox {sandbox_id} still {state!r} after {timeout:.0f}s")
+        where = f" in {region}" if region else ""
+        raise TimeoutError(
+            f"sandbox {sandbox_id} still {state!r} after {timeout:.0f}s{where}. "
+            "Hyderabad provisioning is known to be slow; try In-Bangalore-1 "
+            "(KRUTRIM_SANDBOX_REGION) if this persists.")
 
     def set_ttl(self, sandbox_id: str, ttl_seconds: int) -> None:
         if not TTL_MIN <= ttl_seconds <= TTL_MAX:
