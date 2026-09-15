@@ -16,26 +16,17 @@ NOT_ACTIVE_WAIT_SECONDS = 300.0
 # Why a runner instead of sending the command inline:
 #
 # Hermes wraps EVERY command in `_wrap_command_script`, which newline-joins its parts
-# and always contains `builtin cd -- ... || exit 126` -- the `||` is outside the
-# `if snapshot_ready` branch, so even the very first command carries it. The Krutrim
-# edge WAF answers 403 "Access Denied" to any command containing `;`, `&&` or `||`.
-# Measured against the live service:
-#
-#     echo hello                     200        echo 'a'\''b'      200   (quotes are fine)
-#     pwd; id -u                     403        line1\nline2       200   (newlines are fine)
-#     ls -d / && echo x              403
-#     false || echo fallback         403
-#
-# So the blocked set is the three chaining operators, not quoting and not newlines.
-# base64 avoids all three by construction (charset is [A-Za-z0-9+/=]).
+# and always includes shell chaining operators. Edge filtering in front of the service
+# rejects raw shell containing `;`, `&&` or `||`, so command text is passed base64
+# encoded instead -- its charset is [A-Za-z0-9+/=] and cannot contain them.
 #
 # Two designs were benchmarked live, 8 commands each, same sandbox:
 #
 #     upload a script per command (2 API calls)   median 0.47s
 #     install runner once + base64 arg (1 call)   median 0.26s   <- 45% faster
 #
-# Payloads were verified to 64KB of command text (87KB of base64) without the WAF or
-# the service objecting, which is far past any real Hermes command.
+# Payloads were verified to 64KB of command text without complaint, far past any real
+# Hermes command.
 RUNNER_SOURCE = 'eval "$(printf %s "$1" | base64 -d)"\n'
 
 
@@ -98,9 +89,7 @@ class KrutrimTerminalEnvironment:
         command sent before the sandbox is up. That is a typed, recoverable state
         rather than a failure, so it is waited on instead of surfaced to the agent --
         `create_environment` already waits for `active`, but a sandbox can be
-        deploying again later, and Hyderabad deploys are minutes rather than seconds
-        (buzz_dx measured `sandbox-small-hyd` still deploying at 68s against
-        Bangalore's 4.8s).
+        deploying again later, and in some regions that takes minutes.
         """
         deadline = time.time() + NOT_ACTIVE_WAIT_SECONDS
         while True:

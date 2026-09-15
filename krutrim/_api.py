@@ -41,8 +41,8 @@ class KrutrimError(RuntimeError):
         self.body = body
         snippet = body[:300].decode("utf-8", "replace").strip()
         if b"<TITLE>Access Denied" in body or b"Access Denied" in body[:200]:
-            snippet = ("blocked by the edge WAF (403 Access Denied). A command containing "
-                       "';', '&&' or '||' was sent inline -- it must go through the runner.")
+            snippet = ("rejected by edge filtering. Raw shell containing ';', '&&' or "
+                       "'||' was sent inline -- commands must go through the runner.")
         super().__init__(f"{path} -> HTTP {status}: {snippet}")
 
 
@@ -64,11 +64,8 @@ class KrutrimAPI:
         req.add_header("Accept", "application/json")
         if data is not None:
             req.add_header("Content-Type", content_type)
-        # The service returns transient 5xx on both /files and /commands under normal
-        # use -- observed live as 502 "failed to upload file to sandbox" and 502
-        # "failed to run command in sandbox" on a healthy, active sandbox, roughly
-        # 2 in 4 calls in one unlucky run. They succeed on retry. Without this a
-        # terminal backend is unusable, so 5xx is retried and 4xx never is.
+        # Transient 5xx happen and succeed on retry, so a terminal backend needs
+        # bounded retry to be dependable. 5xx is retried; 4xx never is.
         last: KrutrimError | None = None
         for attempt in range(RETRY_ATTEMPTS):
             try:
