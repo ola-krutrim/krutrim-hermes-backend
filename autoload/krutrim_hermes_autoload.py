@@ -3,9 +3,11 @@ plugin discovery.
 
 WHY THIS EXISTS
 ---------------
-`tools/terminal_tool.py::_get_plugin_env_provider()` reads Hermes' terminal
-environment registry and never triggers plugin discovery, swallowing every
-exception. In a process where discovery has not already run, a correctly
+Hermes' terminal-registry lookup reads the environment registry and never
+triggers plugin discovery, swallowing every exception. Confirmed in both
+layouts: `tools/terminal_tool.py::_get_plugin_env_provider()` up to ~2026-08,
+and `tools/terminal_tool_config.py::_plugin_registry_lookup()` after upstream
+split that file. In a process where discovery has not already run, a correctly
 installed and correctly enabled plugin backend is therefore invisible, and
 `execute_code` fails with::
 
@@ -52,10 +54,22 @@ import sys
 
 __all__ = ["install"]
 
-#: Importing either of these means Hermes is loaded far enough to discover.
+#: Importing any of these means Hermes is loaded far enough to discover.
+#:
+#: Hermes moved this surface: up to ~2026-08 the lookup lived in
+#: `tools/terminal_tool.py`; it has since been split into
+#: `tools/terminal_tool_config.py` (the registry lookup) and
+#: `tools/terminal_tool_backends.py` (the environment factory). Both layouts are
+#: watched so one shim serves both.
+#:
+#: `agent.terminal_env_registry` is the load-bearing one: on both layouts the
+#: lookup imports it INSIDE the function, immediately before reading the
+#: registry, so the trigger fires with discovery still able to help.
 _TRIGGER_MODULES = frozenset({
     "agent.terminal_env_registry",
     "tools.terminal_tool",
+    "tools.terminal_tool_config",
+    "tools.terminal_tool_backends",
 })
 
 _ENV_OPT_OUT = "KRUTRIM_HERMES_NO_AUTOLOAD"

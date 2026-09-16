@@ -14,9 +14,12 @@ WHY SOME TESTS ASSERT A BUG EXISTS
 Two upstream defects are treated as PERMANENT and worked around on our side
 rather than waited on:
 
-1. `tools/terminal_tool.py::_get_plugin_env_provider` reads Hermes' terminal
-   registry without triggering plugin discovery, so a correctly installed
-   backend is invisible in any process that never ran discovery.
+1. Hermes' terminal-registry lookup reads the registry without triggering
+   plugin discovery, so a correctly installed backend is invisible in any
+   process that never ran discovery. Verified present in both layouts:
+   `tools/terminal_tool.py::_get_plugin_env_provider` up to ~2026-08, and
+   `tools/terminal_tool_config.py::_plugin_registry_lookup` after the split.
+   Both swallow every exception, so the miss is silent.
 2. The "Unknown environment type" error never lists loaded-but-unregistered
    plugin backends, so "not installed" and "not loaded" are indistinguishable.
 
@@ -152,9 +155,33 @@ def _probe(body: str, home: str, *, with_shim: bool = False) -> dict:
     }
 
 
-RESOLVE_PROBE = """
-from tools.terminal_tool import _get_plugin_env_provider
+# Hermes split tools/terminal_tool.py in ~2026-09. Import from wherever the
+# symbol lives so the suite tests both layouts rather than only the one the
+# developer happens to have checked out.
+_IMPORT_LOOKUP = """
+try:
+    from tools.terminal_tool_config import _get_plugin_env_provider
+except ImportError:
+    from tools.terminal_tool import _get_plugin_env_provider
+"""
+
+_IMPORT_FACTORY = """
+try:
+    from tools.terminal_tool_backends import _create_environment
+except ImportError:
+    from tools.terminal_tool import _create_environment
+"""
+
+RESOLVE_PROBE = _IMPORT_LOOKUP + """
 result = {"resolved": _get_plugin_env_provider("krutrim") is not None}
+"""
+
+ERROR_MESSAGE_PROBE = _IMPORT_FACTORY + """
+try:
+    _create_environment(env_type="krutrim", image="", cwd="/app", timeout=5)
+    result = {"raised": False, "message": ""}
+except ValueError as exc:
+    result = {"raised": True, "message": str(exc)}
 """
 
 
@@ -259,18 +286,7 @@ class TestBackendIsReachableFromHermes(ProbeCase):
         README quotes this message verbatim; if the wording changes, the docs
         need updating, so this pins it.
         """
-        res = _probe(
-            """
-            from tools.terminal_tool import _create_environment
-            try:
-                _create_environment(env_type="krutrim", image="", cwd="/app", timeout=5)
-                result = {"raised": False, "message": ""}
-            except ValueError as exc:
-                result = {"raised": True, "message": str(exc)}
-            """,
-            self.home,
-            with_shim=False,
-        )
+        res = _probe(ERROR_MESSAGE_PROBE, self.home, with_shim=False)
         self.assertProbeRan(res)
         self.assertTrue(res["raised"], "expected the unresolved-backend ValueError")
         self.assertIn(UNKNOWN_ENV_PREFIX, res["message"])
@@ -300,15 +316,22 @@ class TestManifestMatchesThisHermes(ProbeCase):
         }
         res = _probe(
             """
-            from hermes_cli import plugins as p
-            known = set()
-            for name in ("_KNOWN_MANIFEST_FIELDS", "KNOWN_MANIFEST_FIELDS",
-                         "_MANIFEST_FIELDS", "MANIFEST_FIELDS"):
-                val = getattr(p, name, None)
-                if val:
-                    known |= set(val)
-            result = {"known": sorted(known)}
-            """,
+import importlib
+known = set()
+# Hermes moved manifest parsing out of hermes_cli.plugins into
+# hermes_cli.plugins_manifest in ~2026-09; look in both.
+for mod_name in ("hermes_cli.plugins_manifest", "hermes_cli.plugins"):
+    try:
+        mod = importlib.import_module(mod_name)
+    except Exception:
+        continue
+    for attr in ("_KNOWN_MANIFEST_FIELDS", "KNOWN_MANIFEST_FIELDS",
+                 "_MANIFEST_FIELDS", "MANIFEST_FIELDS"):
+        val = getattr(mod, attr, None)
+        if val:
+            known |= set(val)
+result = {"known": sorted(known)}
+""",
             self.home,
         )
         self.assertProbeRan(res)
