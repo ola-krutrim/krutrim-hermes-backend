@@ -60,32 +60,49 @@ jobs:
           test -f "$RUNNER_TEMP/hermes-agent/hermes_cli/plugins.py" \
             || { echo "::error::pinned Hermes $HERMES_REF has no hermes_cli/plugins.py"; exit 1; }
 
-      - name: Install Hermes and its dependencies
-        run: python -m pip install --quiet "$RUNNER_TEMP/hermes-agent"
+      - name: Install Hermes's dependencies
+        # Hermes itself cannot be pip-installed: its build backend refuses
+        # outright ("Building wheels or sdists for hermes-agent is not
+        # supported" -- it is built with Nix/uv2nix). So install its own pinned
+        # dependency set and import Hermes from the checkout instead, which is
+        # how the tests already run (cwd = HERMES_AGENT_PATH).
+        run: |
+          python - "$RUNNER_TEMP/hermes-agent/pyproject.toml" > "$RUNNER_TEMP/hermes-reqs.txt" <<'PY'
+          import sys, tomllib
+          with open(sys.argv[1], "rb") as fh:
+              print("\n".join(tomllib.load(fh)["project"]["dependencies"]))
+          PY
+          test -s "$RUNNER_TEMP/hermes-reqs.txt" \
+            || { echo "::error::parsed no dependencies from Hermes pyproject"; exit 1; }
+          echo "Installing $(wc -l < "$RUNNER_TEMP/hermes-reqs.txt") pinned Hermes dependencies"
+          python -m pip install --quiet -r "$RUNNER_TEMP/hermes-reqs.txt"
 
       - name: Integration tests
         env:
           HERMES_AGENT_PATH: ${{ runner.temp }}/hermes-agent
           # Turns "no Hermes, skip everything" into a hard failure. Without
           # this the suite silently goes inert and the job reports success over
-          # tests that never ran -- which is exactly how the first version of
-          # this suite shipped.
-          KRUTRIM_REQUIRE_HERMES: "1"
-        run: python -m unittest tests.test_hermes_integration -v
-
-      - name: Assert the integration suite did not skip
-        # Belt and braces for the failure mode this job exists to prevent: a
-        # green tick over a suite that skipped. Fails if any test skipped or if
-        # the expected number did not run.
-        if: always()
-        env:
-          HERMES_AGENT_PATH: ${{ runner.temp }}/hermes-agent
+          # tests that never ran -- which is exactly how it first shipped.
           KRUTRIM_REQUIRE_HERMES: "1"
         run: |
-          out=$(python -m unittest tests.test_hermes_integration 2>&1 | tail -5)
-          echo "$out"
-          case "$out" in
-            *skipped*) echo "::error::integration tests skipped; they must run"; exit 1 ;;
-          esac
-          echo "$out" | grep -qE "^Ran [1-9][0-9]* tests" \
+          set -o pipefail
+          python -m unittest tests.test_hermes_integration -v 2>&1 \
+            | tee "$RUNNER_TEMP/integration.log"
+
+      - name: Assert the suite actually ran
+        # Reads the log from the step above rather than re-running the suite.
+        # An earlier version re-ran it and only grepped for "skipped", so it
+        # reported success while the real run was failing -- a check that
+        # could not fail, guarding against checks that cannot fail.
+        if: always()
+        run: |
+          log="$RUNNER_TEMP/integration.log"
+          test -f "$log" \
+            || { echo "::error::no integration log -- the suite never ran"; exit 1; }
+          grep -qE "^Ran [1-9][0-9]* tests" "$log" \
             || { echo "::error::integration suite ran no tests"; exit 1; }
+          if grep -q "skipped" "$log"; then
+            echo "::error::integration tests skipped; they must run in CI"
+            exit 1
+          fi
+          echo "integration suite ran with no skips"
