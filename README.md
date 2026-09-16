@@ -45,7 +45,7 @@ Measured in `In-Bangalore-1` on `sandbox-small`, driven through Hermes's own env
 | | |
 |---|---|
 | command round-trip | median **0.28 s**, p90 0.40 s |
-| new sandbox ready to use | about **5 seconds** in Bangalore; Hyderabad can take minutes |
+| new sandbox ready to use | about **5 seconds** |
 | commands completed in a 30-command run | **30 of 30** |
 
 A sandbox is created on the first command of a session and deleted when the session ends.
@@ -55,7 +55,7 @@ A sandbox is created on the first command of a session and deleted when the sess
 | Variable | Default | Notes |
 |---|---|---|
 | `KRUTRIMCLIENT_API_KEY` | — | Required. Declared in `strip_env_keys`, so Hermes removes it from every subprocess the agent can see. |
-| `KRUTRIM_SANDBOX_REGION` | `In-Bangalore-1` | Or `In-Hyderabad-1`. Bangalore is recommended during beta — provisioning elsewhere currently takes considerably longer. |
+| `KRUTRIM_SANDBOX_REGION` | `In-Bangalore-1` | The only supported region at launch. `In-Hyderabad-1` is refused with an explanatory error rather than silently creating a sandbox there — provisioning and deletion are unreliable in that region, and a sandbox that will not delete keeps billing. |
 | `KRUTRIM_SANDBOX_FLAVOR` | chosen from `container_cpu` | Pin a size, e.g. `sandbox-medium`. |
 | `KRUTRIM_SANDBOX_TTL_SECONDS` | `3600` | Backstop lifetime, in case a crash skips the normal cleanup. |
 
