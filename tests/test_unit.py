@@ -12,6 +12,7 @@ base with `name`, `is_available` and `create_environment` abstract, and
 `is_container` defaulting True.
 """
 
+import os
 import sys
 import types
 import unittest
@@ -364,9 +365,29 @@ class TestProviderSurface(unittest.TestCase):
             os.environ.pop(_api.API_KEY_ENV, None)
             os.environ.pop("KRUTRIM_SANDBOX_REGION", None)
 
-    def test_hyderabad_gets_a_longer_create_budget_than_bangalore(self):
-        self.assertGreater(_provider.REGION_CREATE_TIMEOUT["In-Hyderabad-1"],
-                           _provider.REGION_CREATE_TIMEOUT["In-Bangalore-1"])
+    def test_bangalore_is_the_only_creatable_region(self):
+        """Launch is Bangalore-only. Anything else must be refused here, because
+        the API itself still accepts In-Hyderabad-1 and hands back a sandbox that
+        is slow to start and does not reliably delete -- and it bills until it does."""
+        self.assertEqual(_provider.REGIONS, ("In-Bangalore-1",))
+
+    def test_an_unsupported_region_is_refused_and_says_why(self):
+        """A bare 'must be one of' would read as a typo. The user set this value on
+        purpose, so the error has to say the region is unsupported, not unrecognised."""
+        self.assertIn("In-Hyderabad-1", _provider.UNSUPPORTED_REGIONS)
+        os.environ[_api.API_KEY_ENV] = "k" * 16
+        os.environ["KRUTRIM_SANDBOX_REGION"] = "In-Hyderabad-1"
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                _provider.KrutrimProvider().create_environment(
+                    cwd="/app", timeout=60, task_id="t", image=None, container_config={})
+            message = str(ctx.exception)
+            self.assertIn("In-Hyderabad-1", message)
+            self.assertIn("not supported", message)
+            self.assertIn("In-Bangalore-1", message)
+        finally:
+            os.environ.pop(_api.API_KEY_ENV, None)
+            os.environ.pop("KRUTRIM_SANDBOX_REGION", None)
 
 
 # --------------------------------------------------------------------------

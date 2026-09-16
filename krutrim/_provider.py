@@ -15,14 +15,21 @@ DEFAULT_FLAVOR = "sandbox-small"
 DEFAULT_TTL_SECONDS = 3600
 DEFAULT_CWD = "/app"
 
-# Regions the sandbox service exposes today, with how long to wait for a create.
+# Regions this plugin will create sandboxes in, with how long to wait for a create.
 #
-# Provisioning time differs enough between regions that a single timeout does not fit
-# both: Bangalore reaches `active` in seconds, Hyderabad currently takes considerably
-# longer. Hyderabad therefore gets a much larger budget, and the failure message names
-# the region rather than reading as a generic timeout.
-REGION_CREATE_TIMEOUT = {"In-Bangalore-1": 240.0, "In-Hyderabad-1": 900.0}
+# Bangalore only, deliberately. Krutrim Sandbox launches with In-Bangalore-1 as the
+# supported region, and In-Hyderabad-1 is not one this plugin should hand a user:
+# measured there, a create did not reach `active` inside 240s and a delete stayed in
+# `deleting` for as long as it was watched -- a sandbox that will not die keeps billing.
+# The API does not currently refuse the region itself, so refusing here is what stops
+# someone reaching it by setting one environment variable.
+#
+# Re-enabling is one line plus a create/wait/command/delete cycle to confirm it.
+REGION_CREATE_TIMEOUT = {"In-Bangalore-1": 240.0}
 REGIONS = tuple(REGION_CREATE_TIMEOUT)
+UNSUPPORTED_REGIONS = {
+    "In-Hyderabad-1": "not supported at launch: provisioning and deletion are unreliable there",
+}
 
 # Fallback only. The live /flavors endpoint is authoritative and is consulted at
 # create time; this table exists so a create can still pick a sane flavor if that
@@ -163,6 +170,11 @@ class KrutrimProvider(TerminalEnvironmentProvider):
         cc = dict(container_config or {})
         api = self._api()
         region = os.environ.get("KRUTRIM_SANDBOX_REGION") or DEFAULT_REGION
+        if region in UNSUPPORTED_REGIONS:
+            raise ValueError(
+                f"KRUTRIM_SANDBOX_REGION={region!r} is {UNSUPPORTED_REGIONS[region]}. "
+                f"Use one of {REGIONS}."
+            )
         if region not in REGIONS:
             raise ValueError(f"KRUTRIM_SANDBOX_REGION must be one of {REGIONS}, got {region!r}")
 

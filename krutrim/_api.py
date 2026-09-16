@@ -123,8 +123,10 @@ class KrutrimAPI:
         where = f" in {region}" if region else ""
         raise TimeoutError(
             f"sandbox {sandbox_id} still {state!r} after {timeout:.0f}s{where}. "
-            "Hyderabad provisioning is known to be slow; try In-Bangalore-1 "
-            "(KRUTRIM_SANDBOX_REGION) if this persists.")
+            "A sandbox normally reaches 'active' in about 5 seconds, so this is a "
+            "service-side problem rather than anything to reconfigure. Make sure this "
+            "sandbox is deleted -- it bills until it is -- and report the id to "
+            "cloudsupport@olakrutrim.com.")
 
     def set_ttl(self, sandbox_id: str, ttl_seconds: int) -> None:
         if not TTL_MIN <= ttl_seconds <= TTL_MAX:
