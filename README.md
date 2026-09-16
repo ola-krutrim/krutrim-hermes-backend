@@ -103,13 +103,28 @@ hermes doctor
 | krutrim `enabled` | `Unknown terminal backend 'krutrim'` | loaded, but registration was dropped | the provider class does not inherit `TerminalEnvironmentProvider` — reinstall from this repo |
 | krutrim `enabled` | no backend error | the plugin is fine **where you ran these commands** — so the failing session is a different one: stale, or a different home or machine | see the two notes below |
 
-Two things that commonly explain an install you believe you did:
+Three things that commonly explain an install you believe you did:
 
 - **A different Hermes home.** Plugins are discovered per home directory, so a session started with
   a different `HERMES_HOME` does not see `~/.hermes/plugins/`. Check it in the failing session, not
   the one you installed from.
 - **A different machine or container.** Installing on your laptop does not install into a hosted or
   containerised agent session. Install where the agent actually runs.
+- **A process that never loads plugins at all.** Hermes' terminal tool reads the plugin registry
+  without triggering discovery, so a backend is invisible in any process that did not run discovery
+  itself. Its own notes name these: gateway platform events, TUI slash workers, query mode and cron.
+  A plain interactive session runs discovery during startup and is fine, which is why this looks
+  intermittent and why "it works for them" is expected rather than a sign your install drifted. This
+  one is not fixable from your side; it is tracked upstream and the check below tells you if it is
+  what you are hitting.
+
+Confirm which of these you have — `resolved = False` means the registry is empty in that process:
+
+```bash
+cd ~/.hermes/hermes-agent   # or your Hermes checkout
+python3 -c 'from tools.terminal_tool import _get_plugin_env_provider; \
+  print("resolved =", _get_plugin_env_provider("krutrim") is not None)'
+```
 
 Set `HERMES_PLUGINS_DEBUG=1` to print plugin discovery and loading as it happens.
 
