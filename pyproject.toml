@@ -15,6 +15,11 @@ classifiers = [
 # the standard library rather than pulling an SDK into a Hermes user's environment.
 dependencies = []
 
+# Hermes discovers entry-point plugins in this group. Without it a pip install
+# is invisible to `hermes plugins list` no matter how correct the package is.
+[project.entry-points."hermes_agent.plugins"]
+krutrim = "krutrim"
+
 [project.urls]
 Homepage = "https://cloud.olakrutrim.com"
 Source = "https://github.com/ola-krutrim/krutrim-hermes-backend"
@@ -25,3 +30,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["krutrim"]
+
+# Ships the startup shim into site-packages: the module plus the .pth that
+# imports it at interpreter start. See autoload/krutrim_hermes_autoload.py for
+# why a plugin backend needs this and a browser or tool plugin does not.
+[tool.hatch.build.targets.wheel.force-include]
+"autoload/krutrim_hermes_autoload.py" = "krutrim_hermes_autoload.py"
+"autoload/krutrim_hermes_autoload.pth" = "krutrim_hermes_autoload.pth"

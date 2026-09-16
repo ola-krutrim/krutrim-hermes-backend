@@ -5,8 +5,19 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  # The Hermes commit this backend is verified against. The plugin terminal
+  # backend API does not exist in any PyPI release (latest is 0.19.0 and has no
+  # agent/terminal_env_registry.py), so integration must come from git.
+  #
+  # Bump this DELIBERATELY. The shim in autoload/ depends on Hermes internals
+  # that carry no compatibility guarantee; moving this pin is how we find out
+  # an upstream change broke it, which is the entire point of the job below.
+  HERMES_REF: 657ee57a99bf1c29936c8e4d5078695c911bc1b1
+
 jobs:
   unit:
+    name: unit (stdlib only)
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -16,6 +27,65 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      # No install step: the plugin and its tests are standard library only.
+      # No install step: the plugin and its unit tests are standard library only.
+      # Scoped to test_unit.py on purpose. This job has no Hermes, so the
+      # integration suite would SKIP here, and a skipped test reports success
+      # while checking nothing. It is run for real by the job below.
       - name: Unit tests
-        run: python -m unittest discover -s tests -v
+        run: python -m unittest discover -s tests -p "test_unit.py" -v
+
+  integration:
+    name: integration (real Hermes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Check out pinned Hermes
+        run: |
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/NousResearch/hermes-agent.git "$RUNNER_TEMP/hermes-agent"
+          git -C "$RUNNER_TEMP/hermes-agent" checkout --detach "$HERMES_REF"
+
+      - name: Verify the pin actually contains the plugin backend API
+        # Guards against a silent no-op: if this file is absent the whole
+        # feature under test does not exist at this ref, and every probe below
+        # would fail for a reason that has nothing to do with our code.
+        run: |
+          test -f "$RUNNER_TEMP/hermes-agent/agent/terminal_env_registry.py" \
+            || { echo "::error::pinned Hermes $HERMES_REF has no agent/terminal_env_registry.py"; exit 1; }
+          test -f "$RUNNER_TEMP/hermes-agent/hermes_cli/plugins.py" \
+            || { echo "::error::pinned Hermes $HERMES_REF has no hermes_cli/plugins.py"; exit 1; }
+
+      - name: Install Hermes and its dependencies
+        run: python -m pip install --quiet "$RUNNER_TEMP/hermes-agent"
+
+      - name: Integration tests
+        env:
+          HERMES_AGENT_PATH: ${{ runner.temp }}/hermes-agent
+          # Turns "no Hermes, skip everything" into a hard failure. Without
+          # this the suite silently goes inert and the job reports success over
+          # tests that never ran -- which is exactly how the first version of
+          # this suite shipped.
+          KRUTRIM_REQUIRE_HERMES: "1"
+        run: python -m unittest tests.test_hermes_integration -v
+
+      - name: Assert the integration suite did not skip
+        # Belt and braces for the failure mode this job exists to prevent: a
+        # green tick over a suite that skipped. Fails if any test skipped or if
+        # the expected number did not run.
+        if: always()
+        env:
+          HERMES_AGENT_PATH: ${{ runner.temp }}/hermes-agent
+          KRUTRIM_REQUIRE_HERMES: "1"
+        run: |
+          out=$(python -m unittest tests.test_hermes_integration 2>&1 | tail -5)
+          echo "$out"
+          case "$out" in
+            *skipped*) echo "::error::integration tests skipped; they must run"; exit 1 ;;
+          esac
+          echo "$out" | grep -qE "^Ran [1-9][0-9]* tests" \
+            || { echo "::error::integration suite ran no tests"; exit 1; }

@@ -12,17 +12,26 @@ It installs as a Hermes **plugin** — no fork of `hermes-agent`, no upstream pu
 > for the plugin, or **cloudsupport@olakrutrim.com** for the sandbox service itself.
 
 ```bash
-git clone https://github.com/ola-krutrim/krutrim-hermes-backend
-rm -rf ~/.hermes/plugins/krutrim          # only if you are reinstalling
-cp -R krutrim-hermes-backend/krutrim ~/.hermes/plugins/krutrim
+# Install into the SAME Python that runs Hermes -- see the note below.
+python3 -m pip install "git+https://github.com/ola-krutrim/krutrim-hermes-backend"
 
 export KRUTRIMCLIENT_API_KEY=<your Krutrim Cloud API key>
 hermes plugins enable krutrim
 hermes config set terminal.backend krutrim
 ```
 
-The `rm -rf` line matters on a reinstall: `cp -R` into an existing directory *nests* the copy, so
-you end up with `~/.hermes/plugins/krutrim/krutrim/` and Hermes finds no plugin.
+> **Install it into the interpreter Hermes runs on.** The package ships a startup hook that keeps the
+> backend resolvable in Hermes processes that never run plugin discovery -- gateway events, slash
+> workers, query mode, cron. That hook only loads for the interpreter whose `site-packages` it was
+> installed into, so installing into a *different* Python leaves the backend invisible in exactly
+> those processes. Running `python3 -m pip` from the same environment you launch `hermes` from is the
+> safe form. Set `KRUTRIM_HERMES_NO_AUTOLOAD=1` to disable the hook.
+
+Copying the `krutrim/` directory into `~/.hermes/plugins/` still works for a quick trial, but it does
+**not** install the startup hook, so it remains subject to the discovery gap described under
+[If a command fails with "Unknown environment type"](#if-a-command-fails-with-unknown-environment-type).
+On a reinstall that way, `rm -rf ~/.hermes/plugins/krutrim` first: `cp -R` into an existing directory
+*nests* the copy, leaving `~/.hermes/plugins/krutrim/krutrim/` where Hermes finds no plugin.
 
 To go back to local execution: `hermes config set terminal.backend local`. The plugin can stay
 installed — only that setting decides where commands run.
