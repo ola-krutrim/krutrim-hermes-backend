@@ -443,5 +443,48 @@ class TestRetryPolicy(unittest.TestCase):
         self.assertEqual(len(attempts), _api.RETRY_ATTEMPTS)
 
 
+class TestResolveCwd(unittest.TestCase):
+    """Hermes passes the SESSION's working directory, which on a containerised or
+    root-owned session is a host path the sandbox has never heard of.
+
+    Every expectation here was measured against a live sandbox-small in
+    In-Bangalore-1 before it was written down:
+
+        no cwd sent      -> runs, pwd is /app
+        cwd=/root        -> 404 cwd not found
+        cwd=/root        -> 404 STILL, after `mkdir -p /root` returns exit 0
+        cwd=/app/project -> 404 on a fresh sandbox
+        cwd=/app/project -> runs, after mkdir
+    """
+
+    def test_absent_cwd_uses_the_sandbox_root(self):
+        for value in (None, "", "   "):
+            self.assertEqual(_env.resolve_cwd(value), "/app")
+
+    def test_host_paths_are_replaced_rather_than_passed_through(self):
+        """`mkdir -p /root` does not make /root usable, so the only fix available
+        is to not send it. Passing it through is what turns a healthy sandbox into
+        a 404 that reads like a broken one."""
+        for host in ("/root", "/home/navendu", "/Users/someone/src", "/tmp", "/"):
+            with self.subTest(host=host):
+                self.assertEqual(_env.resolve_cwd(host), "/app")
+
+    def test_paths_inside_the_sandbox_root_are_kept(self):
+        """These 404 on a fresh sandbox but ARE creatable, so they are kept and
+        created -- discarding them would silently relocate the agent's files."""
+        for good in ("/app", "/app/project", "/app/a/b/c"):
+            with self.subTest(path=good):
+                self.assertEqual(_env.resolve_cwd(good), good)
+
+    def test_traversal_escaping_the_sandbox_root_is_replaced(self):
+        self.assertEqual(_env.resolve_cwd("/app/../root"), "/app")
+        self.assertEqual(_env.resolve_cwd("/app/.."), "/app")
+
+    def test_a_prefix_lookalike_is_not_treated_as_inside(self):
+        """A naive startswith("/app") would wrongly accept these."""
+        self.assertEqual(_env.resolve_cwd("/application"), "/app")
+        self.assertEqual(_env.resolve_cwd("/app-data/x"), "/app")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

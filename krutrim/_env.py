@@ -3,11 +3,47 @@ from __future__ import annotations
 
 import base64
 import os
+import posixpath
+import shlex
 import time
 from typing import Any, Mapping
 from ._api import COMMAND_TIMEOUT_MAX, KrutrimAPI, KrutrimError
 
 RUNNER_PATH = "/app/.hermes_runner.sh"
+
+# The only directory tree a command may run in.
+SANDBOX_ROOT = "/app"
+
+
+def resolve_cwd(requested: str | None) -> str:
+    """Map Hermes's requested working directory onto one the sandbox can use.
+
+    Hermes passes the *session's* working directory. On a containerised or
+    root-owned session that is a host path such as ``/root`` — meaningless
+    inside the sandbox, and rejected with ``404 cwd not found: /root``.
+
+    Measured live, on a fresh `sandbox-small` in `In-Bangalore-1`:
+
+        no cwd sent      -> runs, pwd is /app
+        cwd=/root        -> 404 cwd not found
+        cwd=/root        -> 404 STILL, after `mkdir -p /root` reports success
+        cwd=/app/project -> 404 on a fresh sandbox
+        cwd=/app/project -> runs, after `mkdir -p`
+
+    So the two cases need different handling, and creating the directory is
+    not on its own enough: a path outside ``/app`` cannot be made usable and
+    must be replaced, while a path inside it only needs creating. Sending a
+    host path straight through is what turns a healthy sandbox into a 404 that
+    reads like a broken one.
+    """
+    path = (requested or "").strip()
+    if not path:
+        return SANDBOX_ROOT
+    path = posixpath.normpath(path)
+    if path == SANDBOX_ROOT or path.startswith(SANDBOX_ROOT + "/"):
+        return path
+    return SANDBOX_ROOT
+
 
 # How long execute() will wait out a 409 "sandbox is not active" before giving up.
 # Generous because Hyderabad deploys take minutes, not seconds.
@@ -38,7 +74,7 @@ class KrutrimTerminalEnvironment:
                  owns_sandbox: bool = True):
         self._api = api
         self.sandbox_id = sandbox_id
-        self._cwd = cwd or "/app"
+        self._cwd = resolve_cwd(cwd)
         self._default_timeout = default_timeout
         self._ttl_seconds = ttl_seconds
         self._owns_sandbox = owns_sandbox
@@ -49,6 +85,14 @@ class KrutrimTerminalEnvironment:
     def _ensure_runner(self) -> None:
         if not self._runner_ready:
             self._api.upload(self.sandbox_id, RUNNER_PATH, RUNNER_SOURCE.encode())
+            # A subdirectory of /app does not exist on a fresh sandbox, and a
+            # command naming one as its cwd is a 404 before it ever runs. The
+            # sandbox root itself always exists, so it is a safe place to run
+            # this from. resolve_cwd() has already ruled out anything outside
+            # /app, which mkdir cannot rescue.
+            if self._cwd != SANDBOX_ROOT:
+                self._api.run(self.sandbox_id, "mkdir -p -- " + shlex.quote(self._cwd),
+                              timeout_seconds=30, cwd=SANDBOX_ROOT)
             self._runner_ready = True
 
     def execute(self, command: str, timeout: int | float | None = None, **kwargs: Any) -> dict:
@@ -99,7 +143,7 @@ class KrutrimTerminalEnvironment:
                     self.sandbox_id,
                     f"bash {RUNNER_PATH} {arg}",
                     timeout_seconds=clamped,
-                    cwd=kwargs.get("cwd") or self._cwd,
+                    cwd=resolve_cwd(kwargs.get("cwd")) if kwargs.get("cwd") else self._cwd,
                     env=kwargs.get("env") or kwargs.get("envs"),
                 )
             except KrutrimError as exc:
