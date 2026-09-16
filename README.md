@@ -72,6 +72,51 @@ If you are modifying this plugin, note that the provider class must *inherit* fr
 `TerminalEnvironmentProvider`. One that merely matches the interface is dropped with a log warning
 and no error.
 
+## If a command fails with "Unknown environment type"
+
+```
+Unknown environment type: krutrim. Use 'local', 'docker', 'singularity', 'modal',
+'daytona', 'vercel_sandbox', 'ssh'
+```
+
+This means Hermes reached the plugin lookup and found nothing registered under `krutrim`. **It does
+not mean Hermes cannot use plugin backends**, and it is not a bad API key, a missing sandbox, or a
+provisioning failure. Read the list in the message — Hermes appends every registered plugin backend
+to it. If the list ends at `'ssh'`, **no plugin backend is registered at all** in that session; if
+this plugin were loaded, `'krutrim'` would appear there.
+
+**First, start a new Hermes session.** This is the most common cause by far. Plugin discovery runs
+once per session and is then cached (`discover_and_load` returns early when `self._discovered`), so
+a session that was already running when you enabled the plugin keeps its old backend and cannot see
+this one. Enabling takes effect on the **next** session, not the current one.
+
+If a new session still fails, two commands separate the remaining causes:
+
+```bash
+hermes plugins list | grep krutrim
+hermes doctor
+```
+
+| `plugins list` | `hermes doctor` | cause | fix |
+|---|---|---|---|
+| krutrim absent | — | not installed for this Hermes home | run the install above, in **that** environment |
+| krutrim `enabled` | `Unknown terminal backend 'krutrim'` | loaded, but registration was dropped | the provider class does not inherit `TerminalEnvironmentProvider` — reinstall from this repo |
+| krutrim `enabled` | no backend error | the plugin is fine **where you ran these commands** — so the failing session is a different one: stale, or a different home or machine | see the two notes below |
+
+Two things that commonly explain an install you believe you did:
+
+- **A different Hermes home.** Plugins are discovered per home directory, so a session started with
+  a different `HERMES_HOME` does not see `~/.hermes/plugins/`. Check it in the failing session, not
+  the one you installed from.
+- **A different machine or container.** Installing on your laptop does not install into a hosted or
+  containerised agent session. Install where the agent actually runs.
+
+Set `HERMES_PLUGINS_DEBUG=1` to print plugin discovery and loading as it happens.
+
+⚠️ `hermes plugins doctor krutrim` reports "import and registration passed" in **every** case above,
+including the ones that are broken. It counts tools and hooks and never counts terminal backends.
+Use `hermes doctor`.
+
 ## How commands are dispatched
 
 Hermes wraps every command it runs in a shell script of its own. Rather than sending that script as
