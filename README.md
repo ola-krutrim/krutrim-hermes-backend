@@ -12,20 +12,43 @@ It installs as a Hermes **plugin** — no fork of `hermes-agent`, no upstream pu
 > for the plugin, or **cloudsupport@olakrutrim.com** for the sandbox service itself.
 
 ```bash
-# Install into the SAME Python that runs Hermes -- see the note below.
-python3 -m pip install "git+https://github.com/ola-krutrim/krutrim-hermes-backend"
+# Hermes runs on its own interpreter, not the `python3` on your PATH.
+HERMES_PY="${HERMES_SRC:-$HOME/.hermes/hermes-agent}/venv/bin/python"
+
+"$HERMES_PY" -m ensurepip --upgrade            # that venv ships without pip
+"$HERMES_PY" -m pip install "git+https://github.com/ola-krutrim/krutrim-hermes-backend"
 
 export KRUTRIMCLIENT_API_KEY=<your Krutrim Cloud API key>
 hermes plugins enable krutrim
 hermes config set terminal.backend krutrim
 ```
 
+If you have `uv`, this one line replaces the two above:
+
+```bash
+uv pip install --python "$HERMES_PY" "git+https://github.com/ola-krutrim/krutrim-hermes-backend"
+```
+
 > **Install it into the interpreter Hermes runs on.** The package ships a startup hook that keeps the
 > backend resolvable in Hermes processes that never run plugin discovery -- gateway events, slash
 > workers, query mode, cron. That hook only loads for the interpreter whose `site-packages` it was
 > installed into, so installing into a *different* Python leaves the backend invisible in exactly
-> those processes. Running `python3 -m pip` from the same environment you launch `hermes` from is the
-> safe form. Set `KRUTRIM_HERMES_NO_AUTOLOAD=1` to disable the hook.
+> those processes. That is why the command above spells out `$HERMES_PY` rather than using
+> `python3`: on most machines those are two different interpreters, and the plain `python3` one is
+> the wrong one. Set `KRUTRIM_HERMES_NO_AUTOLOAD=1` to disable the hook.
+>
+> **Why `ensurepip` first:** a standard Hermes install creates its venv without `pip`, so
+> `"$HERMES_PY" -m pip ...` on its own fails with `No module named pip`. `ensurepip` bootstraps it
+> and is a no-op if pip is already there, so the block is safe to paste either way.
+
+⚠️ **`hermes plugins install` is not the command to use here**, even though it looks like it should
+be. It installs the repo into `~/.hermes/plugins/` and the plugin does register — `hermes plugins
+list` shows it `enabled`, and `hermes doctor` is clean — but that route installs **no startup hook**,
+so the backend stays invisible in exactly the processes described above. Verified: after
+`hermes plugins install`, a Hermes process that has not run discovery resolves the backend to
+`None`; after the `pip install` above, the same check resolves it to `KrutrimProvider`. The tell is
+the `Source` column in `hermes plugins list` — `entrypoint` is the pip install and is what you want;
+`user` is a directory install and is subject to the gap.
 
 Copying the `krutrim/` directory into `~/.hermes/plugins/` still works for a quick trial, but it does
 **not** install the startup hook, so it remains subject to the discovery gap described under
