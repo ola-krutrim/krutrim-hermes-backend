@@ -5,6 +5,7 @@ import base64
 import os
 import posixpath
 import shlex
+import threading
 import time
 from typing import Any, Mapping
 from ._api import COMMAND_TIMEOUT_MAX, KrutrimAPI, KrutrimError
@@ -16,29 +17,26 @@ SANDBOX_ROOT = "/app"
 
 
 def resolve_cwd(requested: str | None) -> str:
-    """Map Hermes's requested working directory onto one the sandbox can use.
+    """Normalise the working directory Hermes asked for.
 
-    Hermes passes the *session's* working directory. On a containerised or
-    root-owned session that is a host path such as ``/root`` — meaningless
-    inside the sandbox, and rejected with ``404 cwd not found: /root``.
+    This used to CLAMP anything outside ``/app`` back to ``/app``, because the
+    service rejected a cwd it did not already have:
 
-    Measured live, on a fresh `sandbox-small` in `In-Bangalore-1`:
+        cwd=/root  ->  404 cwd not found: /root   (even after `mkdir -p /root`)
 
-        no cwd sent      -> runs, pwd is /app
-        cwd=/root        -> 404 cwd not found
-        cwd=/root        -> 404 STILL, after `mkdir -p /root` reports success
-        cwd=/app/project -> 404 on a fresh sandbox
-        cwd=/app/project -> runs, after `mkdir -p`
+    That was fixed service-side on 2026-09-17 (Krutrim-Cloud-Service-Omni#106).
+    Measured live after the fix, on a fresh sandbox:
 
-    So the two cases need different handling, and creating the directory is
-    not on its own enough: a path outside ``/app`` cannot be made usable and
-    must be replaced, while a path inside it only needs creating. Sending a
-    host path straight through is what turns a healthy sandbox into a 404 that
-    reads like a broken one.
+        no cwd -> /app    cwd=/root -> /root    cwd=/tmp -> /tmp    cwd=/ -> /
+
+    So the clamp is not merely unnecessary now, it is wrong: it silently moved an
+    agent that asked for ``/tmp`` somewhere else. A directory that does not exist
+    yet is still a 404, which `_ensure_runner` handles by creating it.
     """
     path = (requested or "").strip()
     if not path:
         return SANDBOX_ROOT
+    return posixpath.normpath(path)
     path = posixpath.normpath(path)
     if path == SANDBOX_ROOT or path.startswith(SANDBOX_ROOT + "/"):
         return path
@@ -80,16 +78,18 @@ class KrutrimTerminalEnvironment:
         self._owns_sandbox = owns_sandbox
         self._runner_ready = False
         self._closed = False
+        # One sandbox runs one command at a time. Without this, two
+        # concurrent execute() calls can both see _runner_ready False and
+        # race on uploading the runner they then both invoke.
+        self._execute_lock = threading.RLock()
 
     # -- lifecycle ----------------------------------------------------------
     def _ensure_runner(self) -> None:
         if not self._runner_ready:
             self._api.upload(self.sandbox_id, RUNNER_PATH, RUNNER_SOURCE.encode())
-            # A subdirectory of /app does not exist on a fresh sandbox, and a
-            # command naming one as its cwd is a 404 before it ever runs. The
-            # sandbox root itself always exists, so it is a safe place to run
-            # this from. resolve_cwd() has already ruled out anything outside
-            # /app, which mkdir cannot rescue.
+            # A directory that does not exist yet is a 404 before the command
+            # runs, so create it first. /app always exists, which makes it a safe
+            # place to run the mkdir from.
             if self._cwd != SANDBOX_ROOT:
                 self._api.run(self.sandbox_id, "mkdir -p -- " + shlex.quote(self._cwd),
                               timeout_seconds=30, cwd=SANDBOX_ROOT)
@@ -108,7 +108,8 @@ class KrutrimTerminalEnvironment:
         clamped = min(requested, COMMAND_TIMEOUT_MAX)
         arg = base64.b64encode(command.encode()).decode()
         try:
-            result = self._run_when_active(arg, clamped, kwargs)
+            with self._execute_lock:
+                result = self._run_when_active(arg, clamped, kwargs)
         except KrutrimError as exc:
             return {"output": f"krutrim: {exc}", "exit_code": 1}
         except Exception as exc:  # noqa: BLE001 - surfaced to the agent, never raised
