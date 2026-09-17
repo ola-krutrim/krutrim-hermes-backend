@@ -497,7 +497,7 @@ class TestResolveCwd(unittest.TestCase):
 
 
 class TestSandboxTools(unittest.TestCase):
-    """The explicit sandbox_* tools, adapted from ola-silicon/Hermes_Sandbox_Plugin."""
+    """The explicit sandbox_* tools: schema, mutation classification and approval."""
 
     def test_every_operation_has_a_usable_schema(self):
         for op in _tools.OPERATIONS:

@@ -11,10 +11,11 @@ runs remotely. These tools cover what a shell inside the sandbox cannot reach:
 They are a second dispatch surface. A session with `terminal.backend=krutrim` gets
 both; a session using a different backend can still drive sandboxes with these.
 
-The operation table is adapted from `ola-silicon/Hermes_Sandbox_Plugin`, whose
-declarative shape — one row per endpoint, mutation derived from the HTTP method
-rather than restated per tool — is better than eighteen hand-written functions and
-is kept here deliberately.
+The operations are a table rather than eighteen hand-written functions: one row per
+endpoint, with mutation derived from the HTTP method rather than restated per tool.
+Eighteen functions drift apart; a table cannot. It also means a new read cannot be
+marked destructive by accident, and a new write cannot escape approval because
+someone forgot a flag.
 """
 
 from __future__ import annotations
