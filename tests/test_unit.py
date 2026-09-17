@@ -564,5 +564,31 @@ class TestSandboxTools(unittest.TestCase):
                                  {"sandbox_id": "sb1", "path": "/app/x", "data_base64": huge})
 
 
+class TestVersionConsistency(unittest.TestCase):
+    """pyproject's version is the one that ships.
+
+    `krutrim.__version__` is cosmetic; the version in pyproject.toml is what pip
+    resolves against and what `hermes plugins list` displays. When they drift, the
+    symptom is silent and bad: `pip install --upgrade` decides the user is already
+    current and installs nothing, so new tools never arrive, and the plugin list
+    reports a version the code is not.
+    """
+
+    def _pyproject_version(self) -> str:
+        text = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+        for line in text.splitlines():
+            if line.startswith("version = "):
+                return line.split("=", 1)[1].strip().strip('"')
+        self.fail("no version in pyproject.toml")
+
+    def test_packaged_version_matches_the_module(self):
+        import krutrim
+        self.assertEqual(
+            self._pyproject_version(), krutrim.__version__,
+            "pyproject.toml and krutrim.__version__ disagree; pip ships the former, "
+            "so a bump to only one of them means users never receive the change",
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
