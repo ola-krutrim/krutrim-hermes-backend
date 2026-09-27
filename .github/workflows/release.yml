@@ -1,0 +1,79 @@
+name: release
+
+# Publishing is deliberately tag-driven and manual-to-start: a release happens
+# when someone cuts a vX.Y.Z tag, never on a merge to main. The tag must match
+# the version in pyproject.toml — the job below fails loudly if it does not,
+# because a mismatched release cannot be undone once PyPI has the version.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build and verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build twine
+
+      - name: Refuse to release if the tag and the package disagree
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          MOD="$(python -c 'import re,pathlib; print(re.search(r"__version__\s*=\s*\"([^\"]+)\"", pathlib.Path("krutrim/__init__.py").read_text()).group(1))')"
+          echo "tag=$TAG  pyproject=$PKG  krutrim/__init__=$MOD"
+          test "$TAG" = "$PKG" || { echo "::error::tag $TAG != pyproject version $PKG"; exit 1; }
+          test "$TAG" = "$MOD" || { echo "::error::tag $TAG != __version__ $MOD"; exit 1; }
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: twine check
+        run: python -m twine check dist/*
+
+      # A package that builds but does not register is the exact failure this
+      # backend exists to avoid, so prove discovery before anything is uploaded.
+      - name: Verify the wheel installs and registers its entry point
+        run: |
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install --quiet dist/*.whl
+          /tmp/verify/bin/python - <<'PY'
+          from importlib.metadata import entry_points, version
+          assert version("krutrim-hermes-backend")
+          eps = entry_points().select(group="hermes_agent.plugins")
+          names = [e.name for e in eps]
+          assert "krutrim" in names, f"entry point missing, found {names}"
+          import krutrim_hermes_autoload  # the .pth shim must be importable
+          print("verified:", version("krutrim-hermes-backend"), names)
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    # Trusted Publishing: no long-lived PyPI token lives in this repo.
+    # Configure the publisher once at pypi.org -> project -> Publishing.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/krutrim-hermes-backend
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
